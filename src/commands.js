@@ -1,7 +1,8 @@
-
 import { InlineKeyboard } from "grammy";
 
 const ADMIN_ID = 8855596552;
+const NFT_ACCOUNT = "https://t.me/DealixGarant";
+
 const users = new Map();
 const deals = new Map();
 const tickets = new Map();
@@ -10,7 +11,7 @@ const states = new Map();
 let nextDealId = 1;
 let nextTicketId = 1;
 
-function getUser(id) {
+function user(id) {
   if (!users.has(id)) {
     users.set(id, {
       balance: 0,
@@ -21,100 +22,161 @@ function getUser(id) {
   return users.get(id);
 }
 
-function keyboard(rows) {
+function menu(rows) {
   const kb = new InlineKeyboard();
-  rows.forEach((row, index) => {
-    if (index > 0) kb.row();
-    row.forEach(([label, data]) => kb.text(label, data));
+
+  rows.forEach((row, i) => {
+    if (i) kb.row();
+
+    row.forEach((button) => {
+      if (button.url) {
+        kb.url(button.label, button.url);
+      } else {
+        kb.text(button.label, button.data);
+      }
+    });
   });
+
   return kb;
 }
 
-function back(target = "home") {
-  return keyboard([[["⬅️ Назад", target]]]);
+function btn(label, data) {
+  return { label, data };
 }
 
-function mainKeyboard(id) {
+function link(label, url) {
+  return { label, url };
+}
+
+function back(data = "home") {
+  return menu([[btn("⬅️ Назад", data)]]);
+}
+
+function mainMenu(id) {
   const rows = [
-    [["🤝 Создать сделку", "deal"]],
-    [["💳 Пополнить баланс", "topup"]],
-    [["📋 Мои сделки", "mydeals"]],
-    [["🔎 Проверить пользователя", "lookup"]],
+    [btn("🤝 Создать сделку", "deal")],
+    [btn("💳 Пополнить баланс", "topup")],
+    [btn("📋 Мои сделки", "mydeals")],
+    [btn("🔎 Проверить пользователя", "lookup")],
     [
-      ["👤 Профиль", "profile"],
-      ["💬 Поддержка", "support"],
+      btn("👤 Профиль", "profile"),
+      btn("💬 Поддержка", "support"),
     ],
-    [["📜 Правила и условия", "rules"]],
-    [["❓ Как работает гарант", "how"]],
+    [btn("📜 Правила и условия", "rules")],
+    [btn("❓ Как работает гарант", "how")],
   ];
 
   if (id === ADMIN_ID) {
-    rows.push([["🔐 Админ-панель", "admin"]]);
+    rows.push([btn("🔐 Админ-панель", "admin")]);
   }
 
-  return keyboard(rows);
+  return menu(rows);
 }
 
-const homeText =
+const welcome =
   "🛡 Dealix Garant\n\n" +
   "Добро пожаловать в Dealix Garant — " +
   "сервис сопровождения сделок с " +
   "Telegram NFT, Stars и TON.\n\n" +
   "Выберите необходимый раздел:";
 
-async function show(ctx, text, kb) {
+async function show(ctx, text, reply_markup) {
   if (ctx.callbackQuery) {
+    await ctx.answerCallbackQuery();
+
     try {
-      await ctx.answerCallbackQuery();
       return await ctx.editMessageText(text, {
-        reply_markup: kb,
+        reply_markup,
       });
-    } catch (e) {
-      // Если сообщение нельзя изменить,
-      // отправляем новое.
+    } catch (error) {
+      // Сообщение могло остаться без изменений.
     }
   }
 
-  return ctx.reply(text, { reply_markup: kb });
+  return ctx.reply(text, { reply_markup });
 }
 
-async function notify(bot, id, text, options = {}) {
+async function notify(bot, id, text, reply_markup) {
   try {
-    await bot.api.sendMessage(id, text, options);
+    await bot.api.sendMessage(id, text, {
+      reply_markup,
+    });
     return true;
-  } catch (e) {
+  } catch (error) {
     return false;
   }
+}
+
+function inventoryText(id) {
+  const nfts = user(id).nfts;
+
+  if (!nfts.length) {
+    return (
+      "🎁 NFT-инвентарь | Dealix Garant\n\n" +
+      "Ваш инвентарь пуст.\n\n" +
+      "Для добавления NFT-подарка передайте его " +
+      "нашему официальному аккаунту — @DealixGarant.\n\n" +
+      "После подтверждения получения NFT " +
+      "появится в вашем профиле.\n\n" +
+      "Если сделка не состоится, вы сможете " +
+      "запросить его возврат."
+    );
+  }
+
+  return (
+    "🎁 NFT-инвентарь | Dealix Garant\n\n" +
+    "Доступные NFT-подарки:\n\n" +
+    nfts.map((nft, i) => `${i + 1}. ${nft}`).join("\n") +
+    "\n\nВыберите подарок для сделки."
+  );
+}
+
+function inventoryMenu() {
+  return menu([
+    [link("🎁 Отправить NFT", NFT_ACCOUNT)],
+    [btn("🎁 Выбрать NFT", "choose_nft")],
+    [btn("🔄 Обновить инвентарь", "refresh_nft")],
+    [btn("⬅️ Назад", "deal")],
+  ]);
+}
+
+function adminMenu() {
+  return menu([
+    [btn("💰 Начислить баланс", "admin_credit")],
+    [btn("🎁 Подтвердить NFT", "admin_nft")],
+    [btn("📋 Обращения", "admin_tickets")],
+    [btn("⬅️ Назад", "home")],
+  ]);
 }
 
 export function registerCommands(bot) {
   bot.command("start", (ctx) => {
     states.delete(ctx.from.id);
-    getUser(ctx.from.id);
+    user(ctx.from.id);
 
-    return ctx.reply(homeText, {
-      reply_markup: mainKeyboard(ctx.from.id),
+    return ctx.reply(welcome, {
+      reply_markup: mainMenu(ctx.from.id),
     });
   });
 
   bot.callbackQuery("home", (ctx) => {
     states.delete(ctx.from.id);
-    return show(ctx, homeText, mainKeyboard(ctx.from.id));
+    return show(ctx, welcome, mainMenu(ctx.from.id));
   });
 
   // СОЗДАНИЕ СДЕЛКИ
 
   bot.callbackQuery("deal", (ctx) => {
+    states.delete(ctx.from.id);
+
     return show(
       ctx,
       "🤝 Создание сделки | Dealix Garant\n\n" +
-      "В данном разделе вы можете создать " +
-      "сделку с участием гаранта.\n\n" +
-      "Для продолжения выберите вашу роль:",
-      keyboard([
-        [["💎 Я продавец", "role_seller"]],
-        [["💳 Я покупатель", "role_buyer"]],
-        [["⬅️ Назад", "home"]],
+        "Выберите вашу роль:",
+      menu([
+        [btn("💎 Я продавец", "role_seller")],
+        [btn("💳 Я покупатель", "role_buyer")],
+        [btn("⬅️ Назад", "home")],
       ])
     );
   });
@@ -126,48 +188,44 @@ export function registerCommands(bot) {
       return show(
         ctx,
         "📦 Предмет сделки | Dealix Garant\n\n" +
-        "Ваша роль: " +
-        (role === "seller" ? "Продавец" : "Покупатель") +
-        "\n\nВыберите категорию товара:",
-        keyboard([
-          [["🎁 Telegram NFT-подарки", "cat_" + role + "_nft"]],
-          [["⭐ Telegram Stars", "cat_" + role + "_stars"]],
-          [["🪙 Gram / TON", "cat_" + role + "_ton"]],
-          [["⬅️ Назад", "deal"]],
+          "Ваша роль: " +
+          (role === "seller" ? "Продавец" : "Покупатель") +
+          "\n\nВыберите категорию:",
+        menu([
+          [
+            btn(
+              "🎁 Telegram NFT-подарки",
+              `cat_${role}_nft`
+            ),
+          ],
+          [
+            btn(
+              "⭐ Telegram Stars",
+              `cat_${role}_stars`
+            ),
+          ],
+          [
+            btn("🪙 Gram / TON", `cat_${role}_ton`),
+          ],
+          [btn("⬅️ Назад", "deal")],
         ])
       );
     });
 
     for (const category of ["nft", "stars", "ton"]) {
       bot.callbackQuery(
-        "cat_" + role + "_" + category,
+        `cat_${role}_${category}`,
         (ctx) => {
-          if (category === "nft") {
-            states.set(ctx.from.id, {
-              role,
-              category,
-            });
+          states.set(ctx.from.id, {
+            role,
+            category,
+          });
 
+          if (category === "nft") {
             return show(
               ctx,
-              "🎁 NFT-инвентарь | Dealix Garant\n\n" +
-              (
-                getUser(ctx.from.id).nfts.length
-                  ? "Выберите NFT-подарок из инвентаря."
-                  : "Ваш инвентарь пуст.\n\n" +
-                    "Для добавления NFT-подарка передайте " +
-                    "его нашему официальному аккаунту — " +
-                    "@DealixGarant.\n\n" +
-                    "После подтверждения получения NFT " +
-                    "появится в вашем профиле.\n\n" +
-                    "Если сделка не состоится, вы сможете " +
-                    "запросить его возврат."
-              ),
-              keyboard([
-                [["🎁 Выбрать NFT", "choose_nft"]],
-                [["🔄 Обновить инвентарь", "refresh_nft"]],
-                [["⬅️ Назад", "role_" + role]],
-              ])
+              inventoryText(ctx.from.id),
+              inventoryMenu()
             );
           }
 
@@ -191,10 +249,10 @@ export function registerCommands(bot) {
     }
   }
 
-  // ОБНОВЛЕНИЕ NFT
+  // NFT-ИНВЕНТАРЬ
 
   bot.callbackQuery("refresh_nft", async (ctx) => {
-    const nfts = getUser(ctx.from.id).nfts;
+    const nfts = user(ctx.from.id).nfts;
 
     if (!nfts.length) {
       return ctx.answerCallbackQuery({
@@ -203,38 +261,45 @@ export function registerCommands(bot) {
       });
     }
 
-    return ctx.answerCallbackQuery({
-      text: "NFT в инвентаре: " + nfts.length,
+    await ctx.answerCallbackQuery({
+      text: `NFT в инвентаре: ${nfts.length}`,
       show_alert: true,
     });
+
+    try {
+      await ctx.editMessageText(
+        inventoryText(ctx.from.id),
+        { reply_markup: inventoryMenu() }
+      );
+    } catch (error) {}
   });
 
   bot.callbackQuery("choose_nft", (ctx) => {
-    const nfts = getUser(ctx.from.id).nfts;
+    const nfts = user(ctx.from.id).nfts;
 
     if (!nfts.length) {
       return ctx.answerCallbackQuery({
-        text: "Ваш инвентарь пуст.",
+        text: "Ваш инвентарь пуст. Сначала отправьте NFT.",
         show_alert: true,
       });
     }
 
-    const rows = nfts.slice(0, 20).map((name, i) => [
-      [name.slice(0, 45), "pick_nft_" + i],
+    const rows = nfts.slice(0, 20).map((nft, i) => [
+      btn(nft.slice(0, 45), `pick_nft_${i}`),
     ]);
 
-    rows.push([["⬅️ Назад", "deal"]]);
+    rows.push([btn("⬅️ Назад", "deal")]);
 
     return show(
       ctx,
       "🎁 Выберите NFT для сделки:",
-      keyboard(rows)
+      menu(rows)
     );
   });
 
   bot.callbackQuery(/^pick_nft_(\d+)$/, (ctx) => {
     const index = Number(ctx.match[1]);
-    const nft = getUser(ctx.from.id).nfts[index];
+    const nft = user(ctx.from.id).nfts[index];
 
     if (!nft) {
       return ctx.answerCallbackQuery({
@@ -243,11 +308,11 @@ export function registerCommands(bot) {
       });
     }
 
-    const old = states.get(ctx.from.id) || {};
+    const previous = states.get(ctx.from.id) || {};
 
     states.set(ctx.from.id, {
       step: "counterparty",
-      role: old.role || "seller",
+      role: previous.role || "seller",
       category: "nft",
       item: nft,
       nftIndex: index,
@@ -256,12 +321,12 @@ export function registerCommands(bot) {
     return show(
       ctx,
       "🎁 Выбран NFT: " + nft +
-      "\n\nВведите Telegram ID второго участника:",
+        "\n\nВведите Telegram ID второго участника:",
       back("deal")
     );
   });
 
-  // ПОПОЛНЕНИЕ БАЛАНСА
+  // ПОПОЛНЕНИЕ
 
   bot.callbackQuery("topup", (ctx) => {
     if (ctx.from.id !== ADMIN_ID) {
@@ -274,9 +339,9 @@ export function registerCommands(bot) {
     return show(
       ctx,
       "🔐 Управление балансами",
-      keyboard([
-        [["💰 Начислить баланс", "admin_credit"]],
-        [["⬅️ Назад", "home"]],
+      menu([
+        [btn("💰 Начислить баланс", "admin_credit")],
+        [btn("⬅️ Назад", "home")],
       ])
     );
   });
@@ -284,54 +349,59 @@ export function registerCommands(bot) {
   // ПРОФИЛЬ
 
   bot.callbackQuery("profile", (ctx) => {
-    const u = getUser(ctx.from.id);
+    const u = user(ctx.from.id);
 
     return show(
       ctx,
       "👤 Профиль | Dealix Garant\n\n" +
-      "Telegram ID: " + ctx.from.id + "\n" +
-      "Баланс: " + u.balance + " ₽\n" +
-      "NFT в инвентаре: " + u.nfts.length + "\n" +
-      "Сделок: " + u.deals.length,
-      keyboard([
-        [["🎁 Мой инвентарь", "inventory"]],
-        [["⬅️ Назад", "home"]],
+        "Telegram ID: " + ctx.from.id +
+        "\nБаланс: " + u.balance + " ₽" +
+        "\nNFT в инвентаре: " + u.nfts.length +
+        "\nСделок: " + u.deals.length,
+      menu([
+        [btn("🎁 Мой инвентарь", "inventory")],
+        [btn("⬅️ Назад", "home")],
       ])
     );
   });
 
   bot.callbackQuery("inventory", (ctx) => {
-    const nfts = getUser(ctx.from.id).nfts;
+    const nfts = user(ctx.from.id).nfts;
 
     return show(
       ctx,
       "🎁 Мой NFT-инвентарь\n\n" +
-      (
-        nfts.length
-          ? nfts.map((name, i) => (i + 1) + ". " + name).join("\n")
-          : "Ваш инвентарь пуст."
-      ),
-      back("profile")
+        (nfts.length
+          ? nfts
+              .map((nft, i) => `${i + 1}. ${nft}`)
+              .join("\n")
+          : "Ваш инвентарь пуст."),
+      menu([
+        [link("🎁 Отправить NFT", NFT_ACCOUNT)],
+        [btn("🔄 Обновить инвентарь", "refresh_nft")],
+        [btn("⬅️ Назад", "profile")],
+      ])
     );
   });
 
   // МОИ СДЕЛКИ
 
   bot.callbackQuery("mydeals", (ctx) => {
-    const ids = getUser(ctx.from.id).deals;
-
-    const lines = ids
+    const list = user(ctx.from.id).deals
       .map((id) => deals.get(id))
-      .filter(Boolean)
-      .map((d) =>
-        "№" + d.id + ": " + d.item + "\n" +
-        "Статус: " + d.status
-      );
+      .filter(Boolean);
 
     return show(
       ctx,
       "📋 Мои сделки | Dealix Garant\n\n" +
-      (lines.length ? lines.join("\n\n") : "Сделок пока нет."),
+        (list.length
+          ? list
+              .map(
+                (d) =>
+                  `№${d.id}: ${d.item}\nСтатус: ${d.status}`
+              )
+              .join("\n\n")
+          : "Сделок пока нет."),
       back()
     );
   });
@@ -339,12 +409,14 @@ export function registerCommands(bot) {
   // ПРОВЕРКА ПОЛЬЗОВАТЕЛЯ
 
   bot.callbackQuery("lookup", (ctx) => {
-    states.set(ctx.from.id, { step: "lookup" });
+    states.set(ctx.from.id, {
+      step: "lookup",
+    });
 
     return show(
       ctx,
       "🔎 Проверка пользователя | Dealix Garant\n\n" +
-      "Введите Telegram ID пользователя:",
+        "Введите Telegram ID пользователя:",
       back()
     );
   });
@@ -355,42 +427,45 @@ export function registerCommands(bot) {
     return show(
       ctx,
       "💬 Поддержка | Dealix Garant\n\n" +
-      "Если у вас возникли вопросы или проблемы " +
-      "при проведении сделки, обратитесь в поддержку.\n\n" +
-      "Выберите необходимое действие:",
-      keyboard([
-        [["✉️ Создать обращение", "ticket_new"]],
-        [["📋 Мои обращения", "ticket_list"]],
-        [["⬅️ Назад", "home"]],
+        "Добро пожаловать в службу поддержки.\n\n" +
+        "Если у вас возникли вопросы или проблемы " +
+        "при проведении сделки, обратитесь " +
+        "к администрации сервиса.\n\n" +
+        "Выберите необходимое действие:",
+      menu([
+        [btn("✉️ Создать обращение", "ticket_new")],
+        [btn("📋 Мои обращения", "ticket_list")],
+        [btn("⬅️ Назад", "home")],
       ])
     );
   });
 
   bot.callbackQuery("ticket_new", (ctx) => {
-    states.set(ctx.from.id, { step: "ticket" });
+    states.set(ctx.from.id, {
+      step: "ticket",
+    });
 
     return show(
       ctx,
       "✉️ Создание обращения\n\n" +
-      "Напишите сообщение для службы поддержки:",
+        "Напишите сообщение для поддержки:",
       back("support")
     );
   });
 
   bot.callbackQuery("ticket_list", (ctx) => {
-    const list = [...tickets.values()]
-      .filter((t) => t.owner === ctx.from.id);
+    const list = [...tickets.values()].filter(
+      (t) => t.owner === ctx.from.id
+    );
 
     return show(
       ctx,
       "📋 Мои обращения\n\n" +
-      (
-        list.length
-          ? list.map((t) =>
-              "№" + t.id + " — " + t.status
-            ).join("\n")
-          : "Обращений пока нет."
-      ),
+        (list.length
+          ? list
+              .map((t) => `№${t.id} — ${t.status}`)
+              .join("\n")
+          : "Обращений пока нет."),
       back("support")
     );
   });
@@ -401,11 +476,12 @@ export function registerCommands(bot) {
     return show(
       ctx,
       "📜 Правила и условия | Dealix Garant\n\n" +
-      "1. Участники обязаны указывать достоверные данные.\n" +
-      "2. Условия сделки должны быть подтверждены сторонами.\n" +
-      "3. Передача NFT и средств производится после проверки.\n" +
-      "4. Возврат осуществляется согласно условиям сделки.\n" +
-      "5. Не передавайте пароли и коды входа Telegram.",
+        "1. Участники указывают достоверные данные.\n" +
+        "2. Условия сделки подтверждаются сторонами.\n" +
+        "3. Передача NFT и средств производится " +
+        "после проверки.\n" +
+        "4. Возврат осуществляется по условиям сделки.\n" +
+        "5. Никому не передавайте пароли и коды Telegram.",
       back()
     );
   });
@@ -413,30 +489,21 @@ export function registerCommands(bot) {
   bot.callbackQuery("how", (ctx) => {
     return show(
       ctx,
-      "🛡 Как работает гарант | Dealix Garant\n\n" +
-      "1. Один из участников создаёт сделку.\n" +
-      "2. Продавец передаёт NFT гаранту.\n" +
-      "3. Второй участник подтверждает условия.\n" +
-      "4. Покупатель производит оплату.\n" +
-      "5. После проверки гарант передаёт NFT " +
-      "покупателю, а средства — продавцу.",
-      keyboard([
-        [["🤝 Создать сделку", "deal"]],
-        [["⬅️ Назад", "home"]],
+      "❓ Как работает гарант | Dealix Garant\n\n" +
+        "1. Участник создаёт сделку.\n" +
+        "2. Продавец передаёт NFT гаранту.\n" +
+        "3. Второй участник подтверждает условия.\n" +
+        "4. Покупатель оплачивает товар.\n" +
+        "5. После проверки гарант передаёт NFT " +
+        "покупателю, а средства продавцу.",
+      menu([
+        [btn("🤝 Создать сделку", "deal")],
+        [btn("⬅️ Назад", "home")],
       ])
     );
   });
 
   // АДМИН-ПАНЕЛЬ
-
-  function adminKeyboard() {
-    return keyboard([
-      [["💰 Начислить баланс", "admin_credit"]],
-      [["🎁 Подтвердить NFT", "admin_nft"]],
-      [["📋 Обращения", "admin_tickets"]],
-      [["⬅️ Назад", "home"]],
-    ]);
-  }
 
   bot.command("admin", (ctx) => {
     if (ctx.from.id !== ADMIN_ID) {
@@ -445,7 +512,7 @@ export function registerCommands(bot) {
 
     return ctx.reply(
       "🔐 Админ-панель | Dealix Garant",
-      { reply_markup: adminKeyboard() }
+      { reply_markup: adminMenu() }
     );
   });
 
@@ -460,7 +527,7 @@ export function registerCommands(bot) {
     return show(
       ctx,
       "🔐 Админ-панель | Dealix Garant",
-      adminKeyboard()
+      adminMenu()
     );
   });
 
@@ -472,14 +539,16 @@ export function registerCommands(bot) {
       });
     }
 
-    states.set(ctx.from.id, { step: "admin_credit" });
+    states.set(ctx.from.id, {
+      step: "admin_credit",
+    });
 
     return show(
       ctx,
       "💰 Начисление баланса\n\n" +
-      "Введите Telegram ID, сумму и номер сделки.\n\n" +
-      "Пример:\n123456789 1000 1\n\n" +
-      "Подтверждайте только реальные платежи.",
+        "Введите Telegram ID, сумму и номер сделки.\n\n" +
+        "Пример:\n123456789 1000 1\n\n" +
+        "Подтверждайте только реальные платежи.",
       back("admin")
     );
   });
@@ -492,13 +561,16 @@ export function registerCommands(bot) {
       });
     }
 
-    states.set(ctx.from.id, { step: "admin_nft" });
+    states.set(ctx.from.id, {
+      step: "admin_nft",
+    });
 
     return show(
       ctx,
       "🎁 Подтверждение NFT\n\n" +
-      "Введите Telegram ID и название полученного NFT.\n\n" +
-      "Пример:\n123456789 Plush Pepe",
+        "Введите Telegram ID и название " +
+        "фактически полученного NFT.\n\n" +
+        "Пример:\n123456789 Plush Pepe",
       back("admin")
     );
   });
@@ -511,23 +583,23 @@ export function registerCommands(bot) {
       });
     }
 
-    const list = [...tickets.values()]
-      .filter((t) => t.status === "Открыто");
+    const list = [...tickets.values()].filter(
+      (t) => t.status === "Открыто"
+    );
 
     return show(
       ctx,
       "📋 Обращения | Dealix Garant\n\n" +
-      (
-        list.length
-          ? list.map((t) =>
-              "№" + t.id + "\n" +
-              "Пользователь: " + t.owner + "\n" +
-              t.text
-            ).join("\n\n")
-          : "Открытых обращений нет."
-      ) +
-      "\n\nОтвет: /reply номер текст\n" +
-      "Закрыть: /close номер",
+        (list.length
+          ? list
+              .map(
+                (t) =>
+                  `№${t.id}\nПользователь: ${t.owner}\n${t.text}`
+              )
+              .join("\n\n")
+          : "Открытых обращений нет.") +
+        "\n\nОтвет: /reply номер текст" +
+        "\nЗакрыть: /close номер",
       back("admin")
     );
   });
@@ -542,7 +614,7 @@ export function registerCommands(bot) {
 
     const text = ctx.message.text.trim();
 
-    // Поиск пользователя
+    // Поиск по ID
     if (state.step === "lookup") {
       if (!/^\d+$/.test(text)) {
         return ctx.reply("Введите числовой Telegram ID.");
@@ -553,10 +625,10 @@ export function registerCommands(bot) {
       if (text === String(ADMIN_ID)) {
         return ctx.reply(
           "👤 Профиль пользователя\n\n" +
-          "Telegram ID: 8855596552\n" +
-          "Рейтинг: ⭐⭐⭐⭐⭐ 5.0\n" +
-          "Успешных сделок: 82\n\n" +
-          "Демонстрационные показатели.",
+            "Telegram ID: 8855596552\n" +
+            "Рейтинг: ⭐⭐⭐⭐⭐ 5.0\n" +
+            "Успешных сделок: 82\n\n" +
+            "Демонстрационные показатели.",
           { reply_markup: back("lookup") }
         );
       }
@@ -565,9 +637,11 @@ export function registerCommands(bot) {
 
       return ctx.reply(
         found
-          ? "👤 Пользователь: " + text + "\n" +
-            "Сделок: " + found.deals.length + "\n" +
-            "Рейтинг не установлен."
+          ? "👤 Пользователь: " +
+              text +
+              "\nСделок: " +
+              found.deals.length +
+              "\nРейтинг не установлен."
           : "Пользователь не найден в базе сервиса.",
         { reply_markup: back("lookup") }
       );
@@ -584,7 +658,9 @@ export function registerCommands(bot) {
       states.set(id, {
         ...state,
         step: "counterparty",
-        item: text + " " +
+        item:
+          text +
+          " " +
           (state.category === "stars" ? "Stars" : "TON"),
       });
 
@@ -594,9 +670,13 @@ export function registerCommands(bot) {
       );
     }
 
-    // Второй участник сделки
+    // Создание сделки
     if (state.step === "counterparty") {
-      if (!/^\d+$/.test(text) || Number(text) === id) {
+      if (
+        !/^\d+$/.test(text) ||
+        !Number.isSafeInteger(Number(text)) ||
+        Number(text) === id
+      ) {
         return ctx.reply("Введите корректный Telegram ID.");
       }
 
@@ -612,37 +692,38 @@ export function registerCommands(bot) {
       };
 
       deals.set(dealId, deal);
-      getUser(id).deals.push(dealId);
-      getUser(otherId).deals.push(dealId);
+      user(id).deals.push(dealId);
+      user(otherId).deals.push(dealId);
       states.delete(id);
 
       const sent = await notify(
         bot,
         otherId,
-        "🤝 Приглашение в сделку №" + dealId +
-        "\n\nТовар: " + deal.item +
-        "\nУчастник: " + id +
-        "\n\nПодтвердите участие:",
-        {
-          reply_markup: keyboard([
-            [["✅ Подтвердить", "join_" + dealId]],
-            [["❌ Отклонить", "reject_" + dealId]],
-          ]),
-        }
+        "🤝 Приглашение в сделку №" +
+          dealId +
+          "\n\nТовар: " +
+          deal.item +
+          "\nУчастник: " +
+          id +
+          "\n\nПодтвердите участие:",
+        menu([
+          [btn("✅ Подтвердить", "join_" + dealId)],
+          [btn("❌ Отклонить", "reject_" + dealId)],
+        ])
       );
 
       return ctx.reply(
-        "🤝 Сделка №" + dealId + " создана.\n\n" +
-        (
-          sent
+        "🤝 Сделка №" +
+          dealId +
+          " создана.\n\n" +
+          (sent
             ? "Ожидаем подтверждения второго участника."
             : "Приглашение не доставлено. " +
-              "Второму участнику необходимо открыть бота."
-        )
+              "Второму участнику необходимо открыть бота.")
       );
     }
 
-    // Создание обращения
+    // Обращение в поддержку
     if (state.step === "ticket") {
       if (text.length > 2000) {
         return ctx.reply("Максимум 2000 символов.");
@@ -661,21 +742,33 @@ export function registerCommands(bot) {
       await notify(
         bot,
         ADMIN_ID,
-        "✉️ Обращение №" + ticket.id +
-        "\n\nПользователь: " + id +
-        "\n\n" + text +
-        "\n\nОтветить: /reply " + ticket.id + " текст" +
-        "\nЗакрыть: /close " + ticket.id
+        "✉️ Обращение №" +
+          ticket.id +
+          "\n\nПользователь: " +
+          id +
+          "\n\n" +
+          text +
+          "\n\nОтветить: /reply " +
+          ticket.id +
+          " текст\nЗакрыть: /close " +
+          ticket.id
       );
 
       return ctx.reply(
-        "✅ Обращение №" + ticket.id + " отправлено."
+        "✅ Обращение №" +
+          ticket.id +
+          " отправлено."
       );
     }
 
-    // Начисление администратором
-    if (state.step === "admin_credit" && id === ADMIN_ID) {
-      const match = text.match(/^(\d+)\s+(\d+)\s+(\d+)$/);
+    // Начисление баланса
+    if (
+      state.step === "admin_credit" &&
+      id === ADMIN_ID
+    ) {
+      const match = text.match(
+        /^(\d+)\s+(\d+)\s+(\d+)$/
+      );
 
       if (!match) {
         return ctx.reply(
@@ -688,13 +781,15 @@ export function registerCommands(bot) {
       const dealId = Number(match[3]);
       const deal = deals.get(dealId);
 
-      if (!Number.isSafeInteger(userId) ||
-          !Number.isSafeInteger(amount) ||
-          amount <= 0 ||
-          amount > 100000000 ||
-          !deal ||
-          (deal.owner !== userId &&
-           deal.counterparty !== userId)) {
+      if (
+        !Number.isSafeInteger(userId) ||
+        !Number.isSafeInteger(amount) ||
+        amount <= 0 ||
+        amount > 100000000 ||
+        !deal ||
+        (deal.owner !== userId &&
+          deal.counterparty !== userId)
+      ) {
         return ctx.reply(
           "Проверьте ID, сумму и номер существующей сделки."
         );
@@ -709,24 +804,33 @@ export function registerCommands(bot) {
 
       return ctx.reply(
         "💰 Подтверждение начисления\n\n" +
-        "Пользователь: " + userId +
-        "\nСумма: " + amount + " ₽" +
-        "\nСделка: №" + dealId +
-        "\n\nОтправьте /confirmcredit для подтверждения " +
-        "реально полученного платежа или /cancelcredit для отмены."
+          "Пользователь: " +
+          userId +
+          "\nСумма: " +
+          amount +
+          " ₽\nСделка: №" +
+          dealId +
+          "\n\nПосле проверки платежа отправьте " +
+          "/confirmcredit или /cancelcredit."
       );
     }
 
-    // Подтверждение NFT
-    if (state.step === "admin_nft" && id === ADMIN_ID) {
-      const match = text.match(/^(\d+)\s+(.{2,100})$/);
+    // Добавление NFT администратором
+    if (
+      state.step === "admin_nft" &&
+      id === ADMIN_ID
+    ) {
+      const match = text.match(
+        /^(\d+)\s+(.{2,100})$/
+      );
 
       if (!match) {
-        return ctx.reply("Формат: TelegramID Название NFT");
+        return ctx.reply(
+          "Формат: TelegramID Название NFT"
+        );
       }
 
       const userId = Number(match[1]);
-      const nftName = match[2];
 
       if (!Number.isSafeInteger(userId)) {
         return ctx.reply("Некорректный Telegram ID.");
@@ -735,28 +839,32 @@ export function registerCommands(bot) {
       states.set(id, {
         step: "confirm_nft",
         userId,
-        nftName,
+        nftName: match[2],
       });
 
       return ctx.reply(
         "🎁 Подтверждение NFT\n\n" +
-        "Владелец: " + userId +
-        "\nNFT: " + nftName +
-        "\n\nПроверьте фактическое получение подарка.\n" +
-        "Подтвердить: /confirmnft\n" +
-        "Отменить: /cancelnft"
+          "Владелец: " +
+          userId +
+          "\nNFT: " +
+          match[2] +
+          "\n\nПроверьте получение подарка.\n" +
+          "Подтвердить: /confirmnft\n" +
+          "Отменить: /cancelnft"
       );
     }
   });
 
-  // ПОДТВЕРЖДЕНИЕ УЧАСТИЯ
+  // ПОДТВЕРЖДЕНИЕ СДЕЛКИ
 
   bot.callbackQuery(/^join_(\d+)$/, async (ctx) => {
     const deal = deals.get(Number(ctx.match[1]));
 
-    if (!deal ||
-        deal.counterparty !== ctx.from.id ||
-        deal.status !== "Ожидает подтверждения") {
+    if (
+      !deal ||
+      deal.counterparty !== ctx.from.id ||
+      deal.status !== "Ожидает подтверждения"
+    ) {
       return ctx.answerCallbackQuery({
         text: "Сделка недоступна.",
         show_alert: true,
@@ -767,23 +875,27 @@ export function registerCommands(bot) {
 
     await show(
       ctx,
-      "✅ Вы подтвердили участие в сделке №" + deal.id,
+      "✅ Вы подтвердили участие в сделке №" +
+        deal.id,
       back()
     );
 
     await notify(
       bot,
       deal.owner,
-      "✅ Второй участник подтвердил сделку №" + deal.id
+      "✅ Второй участник подтвердил сделку №" +
+        deal.id
     );
   });
 
   bot.callbackQuery(/^reject_(\d+)$/, async (ctx) => {
     const deal = deals.get(Number(ctx.match[1]));
 
-    if (!deal ||
-        deal.counterparty !== ctx.from.id ||
-        deal.status !== "Ожидает подтверждения") {
+    if (
+      !deal ||
+      deal.counterparty !== ctx.from.id ||
+      deal.status !== "Ожидает подтверждения"
+    ) {
       return ctx.answerCallbackQuery({
         text: "Сделка недоступна.",
         show_alert: true,
@@ -801,7 +913,8 @@ export function registerCommands(bot) {
     await notify(
       bot,
       deal.owner,
-      "❌ Второй участник отклонил сделку №" + deal.id
+      "❌ Второй участник отклонил сделку №" +
+        deal.id
     );
   });
 
@@ -812,26 +925,36 @@ export function registerCommands(bot) {
 
     const state = states.get(ADMIN_ID);
 
-    if (!state || state.step !== "confirm_credit") {
-      return ctx.reply("Нет начисления для подтверждения.");
+    if (
+      !state ||
+      state.step !== "confirm_credit"
+    ) {
+      return ctx.reply(
+        "Нет начисления для подтверждения."
+      );
     }
 
     const deal = deals.get(state.dealId);
 
-    if (!deal ||
-        (deal.owner !== state.userId &&
-         deal.counterparty !== state.userId)) {
+    if (
+      !deal ||
+      (deal.owner !== state.userId &&
+        deal.counterparty !== state.userId)
+    ) {
       return ctx.reply("Сделка не найдена.");
     }
 
-    getUser(state.userId).balance += state.amount;
+    user(state.userId).balance += state.amount;
     states.delete(ADMIN_ID);
 
     const message =
       "💰 Пополнение баланса | Dealix Garant\n\n" +
-      "Пользователь " + state.userId +
-      " пополнил баланс на " + state.amount + " ₽\n" +
-      "Сделка №" + state.dealId +
+      "Пользователь " +
+      state.userId +
+      " пополнил баланс на " +
+      state.amount +
+      " ₽\nСделка №" +
+      state.dealId +
       "\nСтатус: Подтверждено";
 
     await notify(bot, deal.owner, message);
@@ -842,13 +965,15 @@ export function registerCommands(bot) {
 
     return ctx.reply(
       "✅ Начисление подтверждено.",
-      { reply_markup: adminKeyboard() }
+      { reply_markup: adminMenu() }
     );
   });
 
   bot.command("cancelcredit", (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
+
     states.delete(ADMIN_ID);
+
     return ctx.reply("Начисление отменено.");
   });
 
@@ -857,30 +982,40 @@ export function registerCommands(bot) {
 
     const state = states.get(ADMIN_ID);
 
-    if (!state || state.step !== "confirm_nft") {
-      return ctx.reply("Нет NFT для подтверждения.");
+    if (
+      !state ||
+      state.step !== "confirm_nft"
+    ) {
+      return ctx.reply(
+        "Нет NFT для подтверждения."
+      );
     }
 
-    getUser(state.userId).nfts.push(state.nftName);
+    user(state.userId).nfts.push(state.nftName);
     states.delete(ADMIN_ID);
 
     await notify(
       bot,
       state.userId,
-      "🎁 NFT получен и добавлен в инвентарь:\n" +
-      state.nftName
+      "🎁 NFT подтверждён и добавлен " +
+        "в инвентарь:\n" +
+        state.nftName
     );
 
     return ctx.reply(
       "✅ NFT добавлен в инвентарь.",
-      { reply_markup: adminKeyboard() }
+      { reply_markup: adminMenu() }
     );
   });
 
   bot.command("cancelnft", (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
+
     states.delete(ADMIN_ID);
-    return ctx.reply("Подтверждение NFT отменено.");
+
+    return ctx.reply(
+      "Подтверждение NFT отменено."
+    );
   });
 
   bot.command("reply", async (ctx) => {
@@ -891,42 +1026,60 @@ export function registerCommands(bot) {
     );
 
     if (!match) {
-      return ctx.reply("Формат: /reply номер текст");
+      return ctx.reply(
+        "Формат: /reply номер текст"
+      );
     }
 
     const ticket = tickets.get(Number(match[1]));
 
-    if (!ticket || ticket.status !== "Открыто") {
-      return ctx.reply("Открытое обращение не найдено.");
+    if (
+      !ticket ||
+      ticket.status !== "Открыто"
+    ) {
+      return ctx.reply(
+        "Открытое обращение не найдено."
+      );
     }
 
     const sent = await notify(
       bot,
       ticket.owner,
       "💬 Ответ поддержки | Dealix Garant\n\n" +
-      "Обращение №" + ticket.id +
-      "\n\n" + match[2]
+        "Обращение №" +
+        ticket.id +
+        "\n\n" +
+        match[2]
     );
 
     return ctx.reply(
-      sent ? "Ответ отправлен." : "Не удалось отправить ответ."
+      sent
+        ? "Ответ отправлен."
+        : "Не удалось отправить ответ."
     );
   });
 
   bot.command("close", (ctx) => {
     if (ctx.from.id !== ADMIN_ID) return;
 
-    const number = Number(ctx.message.text.split(/\s+/)[1]);
+    const number = Number(
+      ctx.message.text.split(/\s+/)[1]
+    );
+
     const ticket = tickets.get(number);
 
     if (!ticket) {
-      return ctx.reply("Обращение не найдено.");
+      return ctx.reply(
+        "Обращение не найдено."
+      );
     }
 
     ticket.status = "Закрыто";
 
     return ctx.reply(
-      "Обращение №" + number + " закрыто."
+      "Обращение №" +
+        number +
+        " закрыто."
     );
   });
-}
+      }
